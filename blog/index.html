@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Jake Mehlman</title>
+    <link type=text/css rel=stylesheet href="./style.css">
+    <style type="text/css">
+
+img.profile {
+	width: 10em;
+  	float: left;
+  	padding: 1em;
+}
+
+h2 {
+  padding: 0;
+  margin: 0;
+}
+
+.dark {
+  	display: none;
+}
+
+ul {
+	list-style: none;
+	margin: 0;
+	padding: 0.5em;
+}
+li {
+	margin: 0;
+	padding: 0.1em;
+}
+.thumbnail {
+	float: left;
+	clear: both;
+	margin: 0 1em 2em 0;
+	padding: 0;
+}
+.jam {
+	clear:both;
+}
+@media (prefers-color-scheme: dark) {
+  	.dark {
+    	display: block;
+  	}
+  	.light {
+    	display: none;
+  	}
+}
+</style>
+
+
+</head>
+  	<body>
+    	<div style="max-width: 42em; margin: 0; padding: 0;">
+			<!--<img class="profile light" alt="Bright profile picture of Andrew" src="/img/profile-flowers.jpg">-->
+			<!--<img class="profile dark" alt="Dark profile picture of Andrew" src="/img/profile-cartopia.jpg">-->
+		<h1 style="margin: 0; padding: 0.3em 0 0 0">Jake Mehlman</h1>
+		<p>Data scientist at <a href="https://www.everstream.ai/" target=blank>EverstreamAnalytics</a>. Interested in software development and writing high performance python libraries in low level languages (c, c++, ~rust, (zig soon?))</p>
+		<p>
+		<a href="jdm365@georgetown.edu" target=blank>Email</a> |
+		<a href="https://github.com/jdm365/" target=blank>GitHub</a>
+		</p>
+		</div>
+
+<div id="posts">
+<h2>Posts</h2>
+	<ul>
+	  	<li>2024 July 21 - <a href="posts/fast_substring_search_index.html">Building a Fast Substring Search Index</a></li>
+  	</ul>
+</div>
+
+<div id="projects">
+<h2>Projects</h2>
+	<ul>
+  		<li>
+			<a href="https://github.com/jdm365/BlooM25" taget=blank>BlooM25</a> - A high performance full text search engine utilizing bloom filters to quickly search high document frequency terms.
+  		</li>
+
+  		<li>
+  			<a href="https://github.com/jdm365/SuffixArray" taget=blank>SuffixArray</a> - A high performance substring search index utilizing suffix arrays for searching.
+  		</li>
+	</ul>
+</div>
+</body>
+</html>
