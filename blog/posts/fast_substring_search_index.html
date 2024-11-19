@@ -9,7 +9,7 @@
 </head>
   <body>
     <div>
-<a href="/">Jake Mehlman</a> - Building a Fast Substring Search Index (2024 July 21)
+<a href="../index.html">Jake Mehlman</a> - Building a Fast Substring Search Index (2024 July 21)
 </div>
 <hr>
 <div class="post">
@@ -685,7 +685,7 @@ that the charachter at that position of the suffix array is within a quoted fiel
 
 <pre><code class="language-c">pair_u32 get_substring_positions_file(
 	FILE* file,
-	const SuffixArray* suffix_array,
+	const SuffixArray_struct* suffix_array,
     const char* substring
 ) {
     uint32_t m 	   = strlen(substring);
@@ -771,7 +771,7 @@ that the charachter at that position of the suffix array is within a quoted fiel
 
 <pre><code class="language-c">uint32_t get_matching_records_file(
 	const char* filename,
-	const SuffixArray* suffix_array,
+	const SuffixArray_struct* suffix_array,
 	const char* substring,
 	uint32_t k,
 	char** matching_records
@@ -853,15 +853,44 @@ TODO: <i>Have managed file handles which stay open while index is queryable. Avo
 
 <h3>Querying</h3>
 
+<p>
+Query times are quickly dominated by seeking and fetching the individual records. For this reason we can see that query times increase linearly with <code>k</code>, the number of records returned.
+</p>
+<!-- <img src=""> -->
+
+<p>
+Here are query times for this implementation and the similar library PySubstringSearch for this task. (Ours fetches csv records over the file itself. PySubstringSearch writes a new buffer only with the search column's text, and only returns the search column's text.) Clearly the requirement for very fast (sub-millisecond) substring search over potentially hundereds of millions of records has been satisfied. A downside however is that relevance is not natively supported in this kind of search index. It will have to be done on all records with matching substrings if desired which may result in many row fetches and thus become more expensive than a standard BM25 implementation say.
+However for simple substring matching this method seems to be near the best we can do.
+</p> 
+
+<p>
+At the time of writing, I have not yet published this library to pypi. I first want to add support for multi-column search, support for search with the suffix array on disk, and speed up the file reader. However for the current version feel free to check out the <a href="">repo</a> and you can install with a 
+<pre><code class="language-bash">pip install .</code></pre>
+then use with the python interface as so
+<pre><code class="language-bash">from suffix_array import SuffixArray
+
+CSV_FILE   = "companies.csv"
+SEARCH_COL = "name"
+
+## Creates and builds the index from documents.
+suffix_array = SuffixArray(max_suffix_length=32)
+suffix_array.construct_truncated_suffix_array_from_csv(CSV_FILE, SEARCH_COL)
+
+## Query the index.
+## Returns the documents that contain the query substring in a list.
+records = suffix_array.query_records("the quick brown fox")
+</code></pre>
+</p>
 
 
 
 
-<h2 id="follow-up-work">Follow-Up Work</h2>
+
+<h2>Credits</h2>
 
 <hr>
-<p>This implementation is very similar to <a href="https://github.com/Intsights/PySubstringSearch" target=blank>PySubstringSearch</a> only designed to work off of
-and directly index into csv files. Check out thier library with the link provided.</p>
+<p>As mentioned, this implementation is very similar to <a href="https://github.com/Intsights/PySubstringSearch" target=blank>PySubstringSearch</a> only designed to work off of
+and directly index into csv files. Check out their library with the link provided.</p>
 
 <p><a href="../index.html">Home Page</a> |
 <a href="https://github.com/jdm365/" target=blank>GitHub</a></p>
