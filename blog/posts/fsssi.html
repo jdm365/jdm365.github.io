@@ -79,7 +79,7 @@ Median query time: 0.5235s
 <br>
 <p>
 Fairly impressive but clearly won't suffice for real time search and will not scale to 100 million plus records.
-In MB/s we can get:
+In real terms this gets us:
 </p>
 
 <pre><code class="language-python">import os
@@ -95,8 +95,8 @@ print(f"Polars MB/s: {mb_per_second:.2f}")
 </code></pre>
 
 <p>
-To attempt to upper bound the brute force appraoch
-we can look to <a href="https://github.com/BurntSushi/ripgrep" target=blank>ripgrep</a>, one of the fastest substring
+What would be a rough upper bound on how far we might get with a brute force approach?
+For this we can look to <a href="https://github.com/BurntSushi/ripgrep" target=blank>ripgrep</a>. One of if not the fastest substring
 search tools available.
 </p>
 
@@ -123,26 +123,27 @@ print(f"RipGrep MB/s: {mb_per_second:.2f}")
 
 <p>
 Wow that's fast! However this will still only take us so far.
-Let's impose a 30ms latency cap.
 This dataset has roughly <code class="language-python">363MB / 17 million rows ~= 21 bytes per row</code>.
-With our latency cap, we could at best scale to
-<code class="language-python">2,753,120,000 * 0.030 / 21 = 3.9 million rows</code>.
-This also assumes full access to a single machine with 24 threads, which may not be true if you want to support multiple users.
+Imposing a 100ms latency cap on all queries, we can calculate that we could at best scale to
+<code class="language-python">2,753,120,000 * 0.100 / 21 = 13.1 million rows</code>.
+</p>
+
+<p>
+We should also bear in mind this is a single user running on an i9 12900k proccessor, utilizing 24 threads with access to 128GB of DDR4 memory.
+If we wanted to serve this cheaply in the cloud to multiple users this approach is not feasible above this data scale.
 </p>
 
 
 <h2>Suffix Arrays</h2>
 
 <p>
-If you have a static dataset, you can precompute datastructures which allow faster substring searches.
-Similar string indexes are tries for prefix searches, finite-state-transducers for substring search, and inverted indexes for fast token lookups.
-For this task we will implement a suffix array.
+Given that we know the data ahead of time, perhaps we can precompute a datastructure which would allow faster substring searches.
 </p>
 
 <p>
-A <a href="https://en.wikipedia.org/wiki/Suffix_array#:~:text=In%20computer%20science%2C%20a%20suffix,and%20the%20field%20of%20bibliometrics." target=blank>suffix array</a> is an integer array containing the same number of elements as the input string has bytes. 
-The string is sorted lexographically according to its suffixes (from a starting token to the end of the string) and the sorted indicies comprise the suffix array.
-Once the suffix array is created, we can perform binary search to locate the substring, if it exists, in log2(N) time.
+Enter <a href="https://en.wikipedia.org/wiki/Suffix_array#:~:text=In%20computer%20science%2C%20a%20suffix,and%20the%20field%20of%20bibliometrics." target=blank>suffix arrays</a>.
+A Suffix array is an auxillary integer array containing the same number of elements as the input string has bytes. 
+The string is then lexographically sorted according to its suffixes and the sorted indicies comprise the suffix array.
 </p>
 
 <p>
@@ -150,7 +151,7 @@ Let's create a suffix array on small data first to better understand.
 
 Take the string: <pre><code class="language-python">"This is a test"</code></pre>
 
-We can list the suffixes as:
+First what are the suffixes here?
 <pre><code class="language-python">suffixes = [
 	"This is a test",
 	"his is a test",
@@ -190,44 +191,35 @@ Sorting these lexicographically we get:
 </p>
 
 <p>
+**In practice we will not hold all of the suffixes in memory. This is unnecessary and unfeasible for large strings.
+Additionally for long strings we typically can sort the suffixes by only looking at the first few charachters.
+For example <code class="language-python">"apple"</code> and <code class="language-python">"ancestor"</code> can be sorted by only looking at the first two charachters,
+even if their actual suffix lengths were millions of tokens.
+</p>
+
+<p>
 Our suffix array would then be the indicies of the sorted suffixes in the original string.
 <pre><code class="language-python">suffix_array = [ 7  4  9  0  8 11  1  5  2  6  3 12 13 10 ]</code></pre>
 </p>
 
 <p>
-To perform a substring search on this dataset, we can perform a binary search over the suffix array,
-looking at the positions of the original string pointed to by the suffix array.
-Let's walk through an example. For the text above say we want to find all occurences of the substring <code class="language-python">"is"</code>.
-</p>
+How does this allow fast substring quering?
+To query a substring we can simply perform a binary search over the suffix array and the string input to find all matching suffixes.
+Let's illustrate with an example. For the text above let's say we want to find all occurences of the substring <code class="language-python">"is"</code>.
 
+</p>
 <p>
-Here are the steps we would take:<br>
-<ol>
-	<li>Suffix array index: <code class="language-python">low + high / 2 = 6</code>
-		<ul>
-			<li>Suffix array value: 1</li>
-			<li>Position 1 in string: 'h'(ascii value 104)</li>
-			<li><code class="language-python">'h'(104) < 'i'(105)</code> -> Move low needle up. <code class="language-python">low = mid + 1 = 7</code></li>
-		</ul>
-	</li>
-	<li>Suffix array index: <code class="language-python">low + high / 2 = 10</code>
-		<ul>
-			<li>Suffix array value: 3</li>
-			<li>Position 3 in string: 's'(ascii value 115)</li>
-			<li><code class="language-python">'s'(115) > 'i'(105)</code> -> Move high needle down. <code class="language-python">high = mid - 1 = 9</code></li>
-		</ul>
-	</li>
-	<li>Suffix array index: <code class="language-python">low + high / 2 = 8</code>
-		<ul>
-			<li>Suffix array value: 2</li>
-			<li>Position 2 in string: 'i'(ascii value 105)</li>
-			<li><code class="language-python">'i'(105) == 'i'(105)</code> -> Found low match. <code class="language-python">high = mid - 1 = 7</code></li>
-		</ul>
-	</li>
-</ol>
-We've now found the lowest (lexographically) substring match for is. We can then repeat the process but update the high needle when we find an exact match instead of the low needle.
-That gives us a high range of 8. We can then say that we have two substring matches at suffix array positions 7 and 8, which correspond to string positions 5 and 2.
-Below is a basic python implementation.
+We first will look for the "first" occurence of the substring in our suffix array. Meaning that after lexographic sorting this is the first suffix.
+We start our binary search by looking in the middle of our suffix array. Our suffix array has 14 elements so we will look at index 6 first.
+Index 6 in our suffix array is 1. This means that we should look at the suffix starting at index 1 or our input string. The suffix at index 1 of
+<code class="language-python">"This is a test"</code> is <code class="language-python">"his is a test"</code>. h comes before i lexographically, meaning we undershot. 
+Now we set our new low point to be the previous midpoint plus one. So <code class="language-python">low = mid + 1 = 6 + 1 = 7</code>. Our new midpoint is now
+<code class="language-python">mid = (low + high) // 2 = (7 + 13) // 2 = 10</code>. So we repeat the process for index 10. Index 10 in our suffix array is 3
+and the value of the text at index 3 is <code class="language-python">"s is a test"</code>. <code class="language-python">" test"</code> is lexographically above 
+<code class="language-python">"is"</code> meaning we overshot and need to adjust our upper bound to <code class="language-python">high = mid - 1 = 10 - 1 = 9</code>.
+Repeating this process we will find that the first occurence of <code class="language-python">"is"</code> is at index 2 of our suffix array and the second
+occurence is at index 6, which as we can see are adjacent indexes 7 and 8 in our suffix array. Therefore we will have two occurenences of the substring <code class="language-python">"is"</code>.
+Below is a python implementation of this process.
 </p>
 
 <pre><code class="language-python">def compare_strings(query: str, suffix: str):
@@ -308,10 +300,10 @@ This is the essence of the suffix array.
 It allows us to (at query time) find all occurences of a substring in a given text in <code class="language-python">O(log n)</code> time.
 </p>
 
-<p> Now that we know how to efficiently query a suffix array for substrings, we can address the remaining two questions.
+<p> Two questions remain:
 <ol>
-	<li>How can we efficiently construct a suffix array?</li>
-	<li>How can we query our data and get rows of our csv data returned, rather than just text positions.</li>
+	<li>How should we build a suffix array for our dataset?</li>
+	<li>How can we query a subset of the text in a suffix array?</li>
 </ol>
 </p>
 
@@ -319,13 +311,37 @@ It allows us to (at query time) find all occurences of a substring in a given te
 <h2>Building a Suffix Array</h2>
 <p>
 As previously mentioned, the problem of building a suffix array is just a matter of sorting the suffixes of a string.
-Therefore efficiently creating a suffix array is largely boils down to finding the ideal sorting algorithm.
+Therefore efficiently creating a suffix array is largely just determining the ideal sorting algorithm.
 </p>
 
 <p>
 Let's first try a naive approach by using c++'s standard library's sort. This is typically implemented as a quicksort or mergesort O(nlogn).
-We'll also impose a restriction that the maxiumum substring length is user specified. For now we'll use a 32 charachter limit. (In most table datasets this won't make a big difference,
-but on large string datasets with many consecutive charachters (like spaces), it will make a big difference). This allows us to use the <code class="language-c">strncmp</code> function instead of <code class="language-c">strcmp</code>.
+</p>
+
+<pre><code class="language-c">void construct_suffix_array_default(
+	const char* str,
+	uint32_t* suffix_array,
+	uint32_t n
+) {
+	// Construct simple suffix array from str
+	for (uint64_t i = 0; i < n; ++i) {
+		suffix_array[i] = i;
+	}
+
+	// Sort suffix array
+	std::sort(
+		suffix_array,
+		suffix_array + n,
+		[&](int a, int b) {
+			return strcmp(str + a, str + b) < 0;
+		}
+	);
+}
+</code></pre>
+
+<p>
+Running again on the 363MB dataset of company names, this doesn't finish within 12 hours.
+By imposing a restriction however we can greatly improve performance. Users searching for companies will rarely if ever search for long substrings. Concretely, we can limit the suffixes to only consider the first ~32 charachters and stop sorting strings longer than that. Imposing that restriction we get the code below and greatly improve performance.
 </p>
 
 <pre><code class="language-c">void construct_truncated_suffix_array_default(
@@ -349,11 +365,11 @@ but on large string datasets with many consecutive charachters (like spaces), it
 	);
 }
 </code></pre>
-We get a construction time of:
+We now get a construction time of:
 <pre><code>Elapsed time construction default:  120.482775 seconds</code></pre>
 
 <p>
-Fairly reasoable for smaller datasets, but scales superlinearly. We can do better. Ideally we want an algorithm which:
+Much better! Clearly however this won't continue to scale to larger datasets of size 100 million plus records. We would like an algorithm which:
 </p>
 <ol>
 	<li>Can be constructed in approximately linear time</li>
@@ -365,11 +381,17 @@ Fairly reasoable for smaller datasets, but scales superlinearly. We can do bette
 <h2>Linear Time Suffix Array Construction</h2>
 
 <p>
-There are several linear time suffix array construction algorithms. <a href="https://www.cs.helsinki.fi/u/tpkarkka/publications/jacm05-revised.pdf" target=blank>SA-IS</a> is one of the more well known. Implementation: <a href="https://github.com/IlyaGrebnov/libsais" target=blank>libsais</a>. This algorithm is a parallelizable linear time suffix array construction algorithm which only uses 5N auxilliary memory (for the suffix array 4N, and the text itself N). This is also the code used by <a href="https://github.com/Intsights/PySubstringSearch" target=blank>PySubstringSearch</a> to construct their suffix arrays for substring searching (this implementation is very similar to theirs).
+There are several linear time suffix array construction algorithms. We will focus on <a href="https://www.cs.helsinki.fi/u/tpkarkka/publications/jacm05-revised.pdf" target=blank>SA-IS</a> and the implementation <a href="https://github.com/IlyaGrebnov/libsais" target=blank>libsais</a>. This algorithm is a parallelizable linear time suffix array construction algorithm which only uses 5N auxilliary memory (for the suffix array 4N, and the text itself N). This is also the code used by <a href="https://github.com/Intsights/PySubstringSearch" target=blank>PySubstringSearch</a> to construct their suffix arrays for substring searching (this implementation is very similar to theirs).
 </p>
 
 <p>
-I will not go into the details of this algorithm here, but we will benchmark it against the previous <code>std::sort</code> version.
+I will not go into the details of this algorithm here as this is beyond the scope of this article.
+</p>
+
+<img src="./meme0.png" alt="meme0" width="400"/>
+
+<p>
+We will however benchmark it against our previous implementation.
 </p>
 
 <pre><code class="language-c">void bench_libsais(const char* filename) {
@@ -404,21 +426,21 @@ I will not go into the details of this algorithm here, but we will benchmark it 
 </code></pre>
 
 <p>
-We get a much improved construction time of:
+Which gives us a much improved construction time of:
 </p>
 <pre><code>Elapsed time construction libsais:  12.558940 seconds</code></pre>
 
 <p>
-which promises to scale in linear time as well. This likely will suffice, but we can do better, or at least simpler, given our <code>max_suffix_length</code> restriction.
+Additionally this is in linear time. But can we do better given our <code>max_suffix_length</code> restriction?
 </p>
 
 <h2>Bucket Sorting</h2>
 <p>
-Bucket sorting is a far more simple algorithm than SA-IS which also has the benefits of being parallelizable and scales linearly (O(n + k) where k is 256 in our use case). It does however require 4N more memory than SA-IS (for the suffix array, a copy of the suffix array, and the text itself). If you encounter memory limitations SA-IS may be a better alternative.
+Bucket sorting is a far more simple algorithm than SA-IS which also has the benefits of being parallelizable and linear time (O(n + k) where k is 256 in our use case). It does however require 4N more memory than SA-IS (for the suffix array, a copy of the suffix array, and the text itself).
 </p>
 
 <p>
-Let's benchmark this approach.
+Let's benchmark the performance of this method.
 </p>
 
 <pre><code class="language-c">void construct_truncated_suffix_array(
@@ -455,10 +477,8 @@ Let's benchmark this approach.
 </code></pre>
 
 <p>
-The bucket sort it parallelized using openmp and we revert to an insertions sort for sufficiently small buckets (<32 elements). 
-Additionally a 128 bit SIMD strncmp is used. (This typically has minimal impact).
+We parallelize the bucket sort by using openmp and sort sufficiently small buckets (<32 elements) with an insertion sort. 
 </p>
-
 <pre><code class="language-c">void recursive_bucket_sort(
 	const char* str,
 	uint32_t* suffix_array,
@@ -589,6 +609,9 @@ Even extending the max_suffix_length to 128 we get a construction time of:
 </p>
 <pre><code>Elapsed time construction bucket: 7.852674 seconds</code></pre>
 
+<p>
+This recursive bucket sorting approach will only start to suffer when certain buckets become very large. An example might be in a piece of text where there are a lot of spaces for paragraph breaks or for other reasons. In this case the bucket sort will become less efficient and the performance will degrade. However by cutting off the suffixes at a reasonable length we can avoid this issue and as shown actually get improved construction times over SA-IS.
+</p>
 
 <h2>Limiting Maximum Memory Usage</h2>
 
@@ -607,9 +630,8 @@ We will read <code>2GB</code> from the file but only the text of the relevant co
 </p>
 
 <h2>Efficiently Querying CSV Files</h2>
-
 <p>
-We have successfully constructed our suffix array. We can now find all substring matches in our original text with <code>num_chunks</code> different binary searches over at most <code>2GB</code> text chunks. We will get to benchmarks shortly but we will see that this can typically be done in a handful of microseconds if the suffix arrays and text are held in memory, and at most milliseconds if we resort to memory mapping or seeking through the files on disk (assuming SSD).
+We have successfully constructed our suffix array! We can now find all substring matches in our original text with <code>num_chunks</code> different binary searches over at most <code>2GB</code> text chunks. We will get to benchmarks shortly but we will see that this can typically be done in a handful of microseconds if the suffix arrays and text are held in memory, and at most milliseconds if we resort to memory mapping or seeking through the files on disk (assuming SSD).
 </p>
 
 <p>
@@ -625,6 +647,12 @@ New_peak_memory_usage = N (original_text) + 4N (suffix_array) + 4N (temp_suffix_
 </code></pre>
 
 <p>
+<i>
+Note: While this solution does work, the extra memory and compute required to get around the quirks of this file format are quite inelegant. It is worth considering if writing an auxilliary data structure instead of directly reading off of CSV's would be a nicer solution.
+</i>
+</p>
+
+<p>
 After construction and mapping of the suffix array to the file positions, we are left only with <code>4N</code> additional data
 <pre><code>N = Total text bytes
 Result_memory_space = 4N (suffix_array) = 4N
@@ -633,7 +661,7 @@ where N is not the size of the CSV file, but the size of the text in the CSV fil
 </p>
 
 <p>
-Returning to the company dataset. If we want to hold the suffix array and the suffix text in memory for the company names we will need:
+Let's return to our company dataset. If we want to hold the suffix array and the suffix text in memory for the company names we will need:
 <pre><code>N = 363MB
 Memory_usage = 4 * 363MB = 1.45GB
 </code></pre>
@@ -641,7 +669,7 @@ despite the actual file itself being 2GB.
 </p>
 
 <p>
-This is actually quite feasible and may well scale up to 100 million+ records of this sort assuming reasonable hardware with at least <code>8GB</code> of RAM. If we keep the data on disk we will likely just be bottlenecked by disk seek speeds. As a rough estimation given an SSD seek speed of 100 microseconds we can exect <code>2 * log2(N) = 2 * log2(363MB) = 56</code> seeks to find the correct position in the file. This would give us a query time of <code>56 * 100 microseconds = 5.6 milliseconds</code>. In practice (likely due to OS caching) times may be even shorter.
+This is actually quite feasible and may well scale up to 100 million+ records of this sort assuming reasonable hardware with at least <code>8GB</code> of RAM. If we keep the data on disk we will likely just be bottlenecked by disk seek speeds. As a rough estimation given an SSD seek speed of 100 microseconds we can exect <code>2 * log2(N) = 2 * log2(363MB) = 56</code> seeks to find the correct position in the file. This would give us a query time of <code>56 * 100 microseconds = 5.6 milliseconds</code>. In practice (for reasons we will see shortly) times may be even shorter.
 </p>
 
 <p>
@@ -806,10 +834,40 @@ that the charachter at that position of the suffix array is within a quoted fiel
 }
 </code></pre>
 
+<p>
+TODO: <i>Have managed file handles which stay open while index is queryable. Avoid unnecessary syscalls.</i>
+</p>
+
+
+<h2>Benchmarks and Additional Optimizations</h2>
+
+<h3>Consturction</h3>
+<p><b>Note on all measurements: </b>These are taken on my desktop with the hardware mentioned above. The environment is not particularly strongly controlled and measurements will vary from run to run so you may see some slightly different results under the same conditions. I will try not to cherry pick results and will run benchmark tests to confirm that the results I get and provide are representative. Generally I am more interested in relative performance and not absolute performance.</p>
+
+<p>Additional optimizations:</p>
+<ol>
+	<li><b>Stop sorting on line breaks:</b> Both for record breaks and newlines which occur in the text, we do not continue sorting accross these boundaries. This will truncate the amount of total sorting operations and bucket constructions a fair bit. On the company dataset without newline truncation I get a construction time of <code>9.764</code> seconds, and with newline truncation I get <code>8.431</code> seconds.</li>
+	<li><b>Custom avx strncmp (minimal):</b> Compare suffixes 16 bytes at a time in the final insertion sort part of the suffix array construction. With custom strncmp_128 <code>8.806</code> seconds, with <code>8.178</code> seconds.</li>
+	<li><b>Thread scheduling (TODO): </b> Currently my threads are being dispatched over all 256 buckets of my top level recursive_bucket_sort using OpenMP. I have experimented dispatching the threads under static, dynamic, and guided modes and found the best most reliable performance to come from the dynamic mode. When dispatching the threads however I do know beforehand the weight of each workload by the size of each bucket (given by charachter frequency distribution). Therefore it stands to reason that I could dispatch the threads in proportion to the workload. This is listed as a TODO for now.</li>
+</ol>
+
+<h3>Querying</h3>
 
 <p>
-The unfinished code can be viewed <a href="https://github.com/jdm365/SuffixArray" target=blank>here</a> and contains python bindings Usage is demonstrated below.
-<pre><code class="language-python">from suffix_array import SuffixArray
+Query times are quickly dominated by seeking and fetching the individual records. For this reason we can see that query times increase linearly with <code>k</code>, the number of records returned.
+</p>
+<!-- <img src=""> -->
+
+<p>
+Here are query times for this implementation and the similar library PySubstringSearch for this task. (Ours fetches csv records over the file itself. PySubstringSearch writes a new buffer only with the search column's text, and only returns the search column's text.) Clearly the requirement for very fast (sub-millisecond) substring search over potentially hundereds of millions of records has been satisfied. A downside however is that relevance is not natively supported in this kind of search index. It will have to be done on all records with matching substrings if desired which may result in many row fetches and thus become more expensive than a standard BM25 implementation say.
+However for simple substring matching this method seems to be near the best we can do.
+</p> 
+
+<p>
+At the time of writing, I have not yet published this library to pypi. I first want to add support for multi-column search, support for search with the suffix array on disk, and speed up the file reader. However for the current version feel free to check out the <a href="">repo</a> and you can install with a 
+<pre><code class="language-bash">pip install .</code></pre>
+then use with the python interface as so
+<pre><code class="language-bash">from suffix_array import SuffixArray
 
 CSV_FILE   = "companies.csv"
 SEARCH_COL = "name"
@@ -825,11 +883,14 @@ records = suffix_array.query_records("the quick brown fox")
 </p>
 
 
+
+
+
 <h2>Credits</h2>
 
 <hr>
 <p>As mentioned, this implementation is very similar to <a href="https://github.com/Intsights/PySubstringSearch" target=blank>PySubstringSearch</a> only designed to work off of
-and directly index into csv files, returning rows instead of substrings. Check out their library with the link provided.</p>
+and directly index into csv files. Check out their library with the link provided.</p>
 
 <p><a href="../index.html">Home Page</a> |
 <a href="https://github.com/jdm365/" target=blank>GitHub</a></p>
