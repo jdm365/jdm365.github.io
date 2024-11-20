@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Benchmarking Parquet File Format- Jake Mehlman</title>
+    <link type=text/css rel=stylesheet href="../style.css">
+    <link type=text/css rel=stylesheet href="../prism-gruvbox-dark.css">
+<script src="https://s3.amazonaws.com/superjoe/blog-files/prism.js"></script>
+</head>
+  <body>
+    <div>
+<a href="../index.html">Jake Mehlman</a> - Benchmarking Parquet File Format (2024 November 20)
+</div>
+<hr>
+<div class="post">
+	<h1>Benchmarking Parquet File Format</h1>
+
+<p>
+I've spent many weekends of the past year working on text search based side projects. At least at the moment the goal has been mostly just developing these tools as command line utilities.
+Broadly speaking the structure of most of these projects is:
+<ol>
+	<li>Take an input file.</li>
+	<li>Create search index.</li>
+	<li>Enable searching through html gui.</li>
+</ol>
+</p>
+
+<img src="./SEARCH_SMALL.gif">
+
+<p>
+To avoid using unneccessary memory, I have taken the pattern of directly reading of the user provided files at query time.
+To do this efficiently I have created mappings from record index to row byte position in the file. Therefore I have been limited to accepting csv and json files.
+</p>
+
+<p>
+In my day job I primarily use parquet files to store and manage tabular data. As a user, I would strongly appreciate the ability to index and search these files and not
+have to first convert to csv or json. I considered indexing parquet files, but I assumed having to decompress entire row groups and scan column by column would make fetching
+indivual rows infeasible at query time. I assumed that the search would be dominated by this decompression and would drive latencies above acceptable ranges. (I assumed ~200 milliseconds on larger datasets)
+Recently however I've learned of databases like <a href="https://clickhouse.com/" target=blank>Clickhouse</a> which stores data in what is essentially the parquet format. (Compressed row groups of fixed 4096 size, columnar storage within row groups). While designed more for OLAP processes and not for row fetching, clickhouse still boasts reasonable performace for row fetching. Parquet explicitly advertises <a href="https://arrow.apache.org/blog/2022/12/26/querying-parquet-with-millisecond-latency/" taget=blank>low latency</a> for individual row fetches as well.
+</p>
+
+<p>
+This has made me rethink my previous assumptions regarding the feasibility of performing real time search against a backing parquet file. Below are some benchmarks of reading specified row groups from parquet files with various row group sizes. The benchmarks are in python, so it's quite possible that when working in a lower level language one could stream the row group data in keeping only what's needed. Thereby further reducing these latencies.
+</p>
+
+<pre><code class="language-python">import pyarrow.parquet as pq
+import polars as pl
+from time import perf_counter
+
+
+if __name__ == '__main__':
+    FILENAME = "mb.parquet"
+    df = pl.read_parquet(FILENAME)
+
+    row_group_sizes = [1024, 4096, 16384, 65536, 262144, 1048576]
+    for size in row_group_sizes:
+        df.write_parquet(f'{size}.parquet', row_group_size=size)
+
+    tables = {}
+    for size in row_group_sizes:
+        tables[str(size)] = pq.ParquetFile(f'{size}.parquet')
+
+        init = perf_counter()
+        x = tables[str(size)].read_row_group(0)
+        print(f'Parquet {size} row group read time: {perf_counter() - init:.4f}\n')
+</code></pre>
+
+<pre><code class="language-bash">Parquet 1024 row group read time: 0.0023
+
+Parquet 4096 row group read time: 0.0006
+
+Parquet 16384 row group read time: 0.0018
+
+Parquet 65536 row group read time: 0.0064
+
+Parquet 262144 row group read time: 0.0253
+
+Parquet 1048576 row group read time: 0.0953
+</pre></code>
+
+<p><code>mb.parquet</code> is a 956MB (compressed) file containing 19.375 million rows and 12 columns of data from MusicBrainz.
+Even for data of this size, we observe very fast read times especially for row group sizes around 4096. We actually observe sub-millisecond reads for 4096 row group sized reads.
+For a command line tool on existing parquet files, this may be acceptable when not operating on very arge row group sizes. I'm sure that through the c interface there are methods of mitigating this issue as well. If found I will provide an update here.
+</p>
+
+<h2>Hardware</h2>
+
+<ul>
+	<li>CPU: i9 12900k</li>
+	<li>Disk: Samsung 970 EVO Plus</li>
+</ul>
+
+<hr>
+
+<p><a href="../index.html">Home Page</a> |
+<a href="https://github.com/jdm365/" target=blank>GitHub</a></p>
+</body>
+</html>
