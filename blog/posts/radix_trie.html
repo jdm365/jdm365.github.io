@@ -78,11 +78,17 @@ fn getFullMasksU64(comptime T: type) [@bitSizeOf(T)]u64 {
 <br>
 <p>This will provide the correct index in only a few cycles iff the byte we are traversing over is one of the special 54 bytes we initially set aside when constructing
 the <code class="language-c">char_freq_table</code>. Therefore for this method to be effective, your input distrubution will have to be somewhat predictable.
-I.e. english/latin text will likely do well, but numeric keys or say chinese text likely will not fare as well, and will fall into the brute force linear search more often.
+I.e. english/latin text will likely do well, but numeric keys or say chinese text likely will not fare as well*, and will fall into the brute force linear search more often.
 </p>
 
 <p>In my implementation, I have set as a default in order the most frequently occuring bytes in <code class="language-c">enwik9</code> but
 also have a helper function to quickly build a frequency table over a list of keys so as to fit to the individual data distribution.
+</p>
+
+<p>*NOTE: In theory, one could replace the 64 bit struct containing the bitmask with a 256 bit struct, then use SIMD instructions to do a popcount and get the index
+in constant time independent of the distribution. This would be at the cost however of having a 4x larger edge attribute and therefore considerable more memory usage.
+Still one could envision having two+ node types (similar to <a href=https://db.in.tum.de/~leis/papers/ART.pdf>ART</a>), where the root nodes or nodes with more edges
+are/become node types with this 256 bit mask, and the lower nodes with fewer edges maintain standard lexographically sorted edge arrays. I may explore this and compare with ART at some point in the future.
 </p>
 
 <hr>
