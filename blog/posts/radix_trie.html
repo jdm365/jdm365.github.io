@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Avoiding Binary Search in Radix Trie Traversals</title>
+    <link type=text/css rel=stylesheet href="../style.css">
+    <link type=text/css rel=stylesheet href="../prism-gruvbox-dark.css">
+<script src="https://s3.amazonaws.com/superjoe/blog-files/prism.js"></script>
+</head>
+  <body>
+    <div>
+<a href="../index.html">Jake Mehlman</a> - Avoiding Binary Search in Radix Trie Traversals (2025 February 04)
+</div>
+<hr>
+<div class="post">
+	<h1>Avoiding Binary Search in Radix Trie Traversals</h1>
+
+<p>
+In a standard radix trie, which is a compressed prefix trie, edges (keys) are stored in lexographically sorted order.
+</p>
+
+<img src="./tree.png" width=40%>
+
+<p>
+When traversing the tree, following a query, say for a prefix search of "biggest", we need to identify if a matching edge exists at each stage of the trie.
+If our keys are lexographically sorted, we can do a binary search instead of a brute force linear search. You could imagine that under the b node there are up to
+256 possible keys. Brute force can get expensive. One constant time branchless way of determining if and where a key exists I found is to keep a bitmask of key positions
+and use the popcount instruction to determine the proper index if it exists. (I'm sure this approach has been used before but I struggled finding it).
+</p>
+<pre><code class="language-c">pub const EdgeData = packed struct(u64) {
+	freq_char_bitmask: u55,
+	num_edges: u9,
+};
+
+pub inline fn getInsertIdx(
+    char_freq_table: *const [256]u8,
+    bitmask: u64,
+    char: u8,
+    ) usize {
+    const shift_len: usize = @intCast(char_freq_table[@intCast(char)]);
+    return @popCount(bitmask & FULL_MASKS[shift_len]);
+}
+
+fn getFullMasksU64(comptime T: type) [@bitSizeOf(T)]u64 {
+    const num_bits = @bitSizeOf(T);
+    var value: u64 = @as(u64, @intCast(std.math.maxInt(T))) - 1;
+
+    const overall_mask = value;
+
+    var masks: [num_bits]u64 = undefined;
+    for (0..num_bits) |idx| {
+        masks[idx] = value & overall_mask;
+        value <<= 1;
+    }
+    return masks;
+}
+</code></pre>
+
+<p>This approach works as follows.</p>
+<ol>
+	<li>For each edge (node's prefix) define a 64 bit struct with a 55 bit bitmask.</li>
+	<li>Separately, for each u8 byte, define a mapping from {input_char: bitmap_idx}.
+		This mapping <code class="language-c">char_freq_table: [256]u8</code> will have 54 non-zero entries,
+		and the others unique values [1, 55].
+		During insertion, we first look up the start byte in this table. If it is non-zero and returns an index,
+		we set that bit in the bitmask.
+	</li>
+	<li>Subsequently during traversal, we first again check the index in the <code class="language-c">char_freq_table</code>.
+		If zero then we have a non-special charachter. We begin from index <code class="language-c">@popCount(bitmask)</code> of our edges and proceed a linear search.
+		If non-zero, we can immediately go to the correct edge index as shown in the <code class="language-c">getInsertIdx</code> function.
+		If we define 54 <code class="language-c">FULL_MASKS</code> bitmasks according to the <code class="language-c">getFullMasksU64</code> function,
+		which simply masks the most significant <code class="language-c">63 - byte_idx</code> bits of our bitmask, we will be left only with edge indexes
+		which could theoretically be placed earlier in our edge array than the current edge. Of those remaining, we apply a popcount to get the number of those
+		edges which are present, and go to that index.
+	</li>
+</ol>
+
+<br>
+<p>This will provide the correct index in only a few cycles iff the byte we are traversing over is one of the special 54 bytes we initially set aside when constructing
+the <code class="language-c">char_freq_table</code>. Therefore for this method to be effective, your input distrubution will have to be somewhat predictable.
+I.e. english/latin text will likely do well, but numeric keys or say chinese text likely will not fare as well, and will fall into the brute force linear search more often.
+</p>
+
+<p>In my implementation, I have set as a default in order the most frequently occuring bytes in <code class="language-c">enwik9</code> but
+also have a helper function to quickly build a frequency table over a list of keys so as to fit to the individual data distribution.
+</p>
+
+<hr>
+
+<p><a href="../index.html">Home Page</a> |
+<a href="https://github.com/jdm365/" target=blank>GitHub</a></p>
+</body>
+</html>
